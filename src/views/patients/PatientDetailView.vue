@@ -252,8 +252,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref as vueRef, onMounted, computed } from 'vue' // Renamed ref to vueRef
 import { useRoute, useRouter } from 'vue-router'
+import { usePatientStore } from '@/stores/patient'
 import { useGSAP } from '@/composables/useGSAP'
 import { formatDate } from '@/utils/formatters'
 import Button from '@/components/ui/Button.vue'
@@ -268,48 +269,24 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const patientStore = usePatientStore()
 const { fadeIn } = useGSAP()
 
 // Refs pour animations
-const headerRef = ref<HTMLElement>()
-const personalInfoRef = ref<HTMLElement>()
-const universityInfoRef = ref<HTMLElement>()
-const medicalInfoRef = ref<HTMLElement>()
-const actionsRef = ref<HTMLElement>()
-const statsRef = ref<HTMLElement>()
-const activityRef = ref<HTMLElement>()
+const headerRef = vueRef<HTMLElement>()
+const personalInfoRef = vueRef<HTMLElement>()
+const universityInfoRef = vueRef<HTMLElement>()
+const medicalInfoRef = vueRef<HTMLElement>()
+const actionsRef = vueRef<HTMLElement>()
+const statsRef = vueRef<HTMLElement>()
+const activityRef = vueRef<HTMLElement>()
 
 // État
-const loading = ref(true)
-const patient = ref<any>(null)
-
-// Données de démonstration
-const mockPatient = {
-  id: '1',
-  patientNumber: 'P-2024-001',
-  firstName: 'Marie',
-  lastName: 'Dupont',
-  email: 'marie.dupont@etudiant.univ.ci',
-  phone: '+225 01 02 03 04 05',
-  dateOfBirth: '1995-06-15',
-  gender: 'female',
-  address: 'Cocody, Angré 8ème tranche, Villa 123',
-  city: 'Abidjan',
-  nationalId: 'CI123456789',
-  studentId: 'ETU-2024-001',
-  isUniversityAffiliated: true,
-  universityDepartment: 'Informatique',
-  universityYear: 'Master 1',
-  emergencyContactName: 'Jean Dupont',
-  emergencyContactPhone: '+225 07 08 09 10 11',
-  bloodType: 'A+',
-  allergies: 'Allergie aux arachides',
-  medicalHistory: 'Asthme léger depuis l\'enfance',
-  status: 'active',
-  createdAt: '2024-01-15T10:30:00Z'
-}
+const loading = computed(() => patientStore.loading)
+const patient = computed(() => patientStore.currentPatient)
 
 // Méthodes utilitaires
+// Mock patient data removed as it will come from the store
 const getStatusClass = (status: string) => {
   const classes = {
     active: 'bg-green-100 text-green-800',
@@ -349,30 +326,30 @@ const sendNotification = () => {
   alert('Fonctionnalité de notification à implémenter')
 }
 
-// Chargement des données
-const loadPatient = async () => {
-  loading.value = true
-  try {
-    // Simuler un appel API
-    await new Promise(resolve => setTimeout(resolve, 800))
-    
-    // En réalité, on ferait un appel API avec l'ID
-    if (route.params.id === '1') {
-      patient.value = mockPatient
-    } else {
-      patient.value = null
-    }
-  } catch (error) {
-    console.error('Erreur lors du chargement:', error)
-    patient.value = null
-  } finally {
-    loading.value = false
+// Chargement des données (sera appelé dans onMounted)
+const fetchPatientData = async () => {
+  // patientStore.loading sera mis à jour par l'action fetchPatient
+  const patientIdParam = route.params.id;
+  const patientId = Array.isArray(patientIdParam) ? patientIdParam[0] : patientIdParam;
+
+  if (patientId) {
+    await patientStore.fetchPatient(patientId);
+    // Après le fetch, patient.value (computed) sera mis à jour.
+    // patientStore.error peut être vérifié ici si une gestion d'erreur plus fine est nécessaire que le v-else du template.
+  } else {
+    console.error("Patient ID manquant dans les paramètres de la route.");
+    // Gérer l'absence d'ID, par exemple en redirigeant ou en affichant une erreur.
+    // patientStore.setError("ID du patient non fourni."); // Exemple de gestion d'erreur custom
   }
 }
 
 onMounted(async () => {
-  await loadPatient()
+  await fetchPatientData(); // Appelle la fonction pour charger les données
   
+  // Les animations ne doivent se déclencher que si le patient est chargé.
+  // On peut utiliser un watcher sur patient.value ou attendre la fin du loading.
+  // Pour l'instant, on part du principe que si patient.value devient non null, on anime.
+  // Un watcher serait plus robuste pour cela.
   if (patient.value) {
     // Animations d'entrée séquentielles
     const refs = [

@@ -38,6 +38,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/patients/:id/edit',
+    name: 'EditPatient',
+    component: () => import('@/views/patients/NewPatientView.vue'), // Reuse NewPatientView
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/subscriptions',
     name: 'Subscriptions',
     component: () => import('@/views/subscriptions/SubscriptionsView.vue'),

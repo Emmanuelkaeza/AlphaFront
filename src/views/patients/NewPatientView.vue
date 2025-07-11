@@ -1,12 +1,12 @@
 <template>
   <div class="max-w-4xl mx-auto space-y-6">
     <!-- En-tête -->
-    <div class="bg-white rounded-lg shadow-sm p-6" ref="headerRef">
+    <div class="bg-white rounded-lg shadow-sm p-6" :ref="el => headerRef = el as HTMLElement">
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="text-2xl font-bold text-gray-900">Nouveau patient</h1>
+          <h1 class="text-2xl font-bold text-gray-900">{{ isEditMode ? 'Modifier le patient' : 'Nouveau patient' }}</h1>
           <p class="mt-1 text-sm text-gray-600">
-            Enregistrer un nouveau patient dans le système
+            {{ isEditMode ? 'Mettez à jour les informations du patient.' : 'Enregistrer un nouveau patient dans le système' }}
           </p>
         </div>
         <Button variant="outline" @click="$router.back()">
@@ -282,16 +282,16 @@
             type="submit"
             :disabled="loading || !isFormValid"
           >
-            <span v-if="loading" class="flex items-center">
+            <span v-if="loading" class="flex items-center justify-center">
               <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Enregistrement...
+              {{ isEditMode ? 'Mise à jour...' : 'Enregistrement...' }}
             </span>
-            <span v-else>
-              <UserPlusIcon class="h-4 w-4 mr-2" />
-              Créer le patient
+            <span v-else class="flex items-center justify-center">
+              <component :is="isEditMode ? PencilSquareIcon : UserPlusIcon" class="h-4 w-4 mr-2" />
+              {{ isEditMode ? 'Enregistrer les modifications' : 'Créer le patient' }}
             </span>
           </Button>
         </div>
@@ -301,30 +301,39 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, computed, onMounted, ref as vueRef, watch } from 'vue' // Added watch
+import { useRouter, useRoute } from 'vue-router' // Added useRoute
+import { usePatientStore } from '@/stores/patient'
+import { notifications } from '@/composables/useNotifications'
 import { useGSAP } from '@/composables/useGSAP'
 import Button from '@/components/ui/Button.vue'
 import {
   ArrowLeftIcon,
   UserPlusIcon,
-  DocumentIcon
+  DocumentIcon,
+  PencilSquareIcon // For edit mode button
 } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
+const route = useRoute() // Initialize useRoute
+const patientStore = usePatientStore()
 const { fadeIn } = useGSAP()
 
-// Refs pour animations
-const headerRef = ref<HTMLElement>()
-const personalInfoRef = ref<HTMLElement>()
-const addressRef = ref<HTMLElement>()
-const universityRef = ref<HTMLElement>()
-const emergencyRef = ref<HTMLElement>()
-const medicalRef = ref<HTMLElement>()
-const actionsRef = ref<HTMLElement>()
+// Determine if in edit mode
+const patientId = vueRef<string | null>(null)
+const isEditMode = computed(() => !!patientId.value)
+
+// Refs pour animations (utilisez vueRef ici)
+const headerRef = vueRef<HTMLElement>()
+const personalInfoRef = vueRef<HTMLElement>()
+const addressRef = vueRef<HTMLElement>()
+const universityRef = vueRef<HTMLElement>()
+const emergencyRef = vueRef<HTMLElement>()
+const medicalRef = vueRef<HTMLElement>()
+const actionsRef = vueRef<HTMLElement>()
 
 // État du formulaire
-const loading = ref(false)
+const loading = computed(() => patientStore.loading)
 
 const form = reactive({
   firstName: '',
@@ -401,34 +410,72 @@ const isFormValid = computed(() => {
 
 // Actions
 const handleSubmit = async () => {
-  if (!validateForm()) return
+  if (!validateForm()) return;
 
-  loading.value = true
+  const patientData = { ...form };
+
   try {
-    // Simuler l'appel API
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // Ici, on ferait l'appel API réel
-    console.log('Création du patient:', form)
-    
-    // Redirection avec message de succès
-    router.push('/patients?created=success')
-    
-  } catch (error) {
-    console.error('Erreur lors de la création:', error)
-    alert('Erreur lors de la création du patient')
-  } finally {
-    loading.value = false
+    if (isEditMode.value && patientId.value) {
+      const updatedPatient = await patientStore.updatePatient(patientId.value, patientData);
+      if (updatedPatient && updatedPatient.id) {
+        notifications.success({ title: 'Succès', message: 'Patient mis à jour avec succès!' });
+        router.push(`/patients/${updatedPatient.id}`);
+      } else {
+        notifications.error({ title: 'Erreur Inattendue', message: 'La mise à jour du patient semble avoir échoué.' });
+      }
+    } else {
+      const newPatient = await patientStore.createPatient(patientData);
+      if (newPatient && newPatient.id) {
+        notifications.success({ title: 'Succès', message: 'Patient créé avec succès!' });
+        router.push(`/patients/${newPatient.id}`);
+      } else {
+        notifications.error({ title: 'Erreur Inattendue', message: 'La création du patient semble avoir échoué.' });
+      }
+    }
+  } catch (error: any) {
+    console.error(`Erreur lors de ${isEditMode.value ? 'la mise à jour' : 'la création'} du patient (vue):`, error);
+    if (error.response?.data?.errors) {
+      const serverErrors = error.response.data.errors;
+      let VITE_ASSIGN_ERRORS = true;
+      if (VITE_ASSIGN_ERRORS) {
+        Object.keys(serverErrors).forEach(key => {
+          if (errors.hasOwnProperty(key)) {
+            const errorMessages = serverErrors[key];
+            errors[key as keyof typeof errors] = Array.isArray(errorMessages) ? errorMessages.join(', ') : String(errorMessages);
+          }
+        });
+        notifications.warning({ title: 'Erreur de validation', message: 'Veuillez corriger les erreurs indiquées dans le formulaire.' });
+      }
+    }
   }
 }
 
 const saveDraft = async () => {
   // Logique pour sauvegarder en brouillon
   console.log('Sauvegarde du brouillon:', form)
-  alert('Brouillon sauvegardé avec succès')
+  // Pourrait être étendu pour utiliser localStorage ou une API de brouillon
+  notifications.info({ title: 'Brouillon', message: 'Fonctionnalité de brouillon non implémentée.' });
 }
 
-onMounted(() => {
+onMounted(async () => {
+  const idFromRoute = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id;
+  if (idFromRoute) {
+    patientId.value = idFromRoute;
+    // Nettoyer le formulaire avant de potentiellement le remplir
+    Object.keys(form).forEach(key => {
+        const formKey = key as keyof typeof form;
+        if (typeof form[formKey] === 'boolean') {
+            (form[formKey] as any) = false;
+        } else {
+            (form[formKey] as any) = '';
+        }
+    });
+    await patientStore.fetchPatient(patientId.value);
+  } else {
+    // S'assurer que currentPatient est null si on est en mode création et qu'on vient d'un mode édition
+    patientStore.setCurrentPatient(null);
+  }
+
   // Animations d'entrée séquentielles
   const refs = [
     headerRef,

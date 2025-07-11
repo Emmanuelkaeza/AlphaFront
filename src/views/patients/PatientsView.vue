@@ -12,7 +12,7 @@
         <div class="flex items-center space-x-3">
           <Button 
             variant="outline" 
-            @click="exportPatients"
+            @click="exportPatientsData"
             :disabled="loading"
           >
             <ArrowDownTrayIcon class="h-4 w-4 mr-2" />
@@ -30,22 +30,23 @@
     <div class="bg-white rounded-lg shadow-sm p-6" ref="filtersRef">
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
-          <label class="form-label">Recherche</label>
+          <label for="searchPatient" class="form-label">Recherche</label>
           <div class="relative">
             <MagnifyingGlassIcon class="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
-              v-model="filters.search"
+              id="searchPatient"
+              v-model="viewFilters.search"
               type="text"
               placeholder="Nom, email, numéro..."
               class="form-input pl-10"
-              @input="debouncedSearch"
+              @input="debouncedApplyFilters"
             />
           </div>
         </div>
         
         <div>
-          <label class="form-label">Statut</label>
-          <select v-model="filters.status" class="form-input" @change="applyFilters">
+          <label for="statusFilter" class="form-label">Statut</label>
+          <select id="statusFilter" v-model="viewFilters.status" class="form-input" @change="applyViewFilters">
             <option value="">Tous les statuts</option>
             <option value="active">Actif</option>
             <option value="inactive">Inactif</option>
@@ -54,8 +55,8 @@
         </div>
         
         <div>
-          <label class="form-label">Affiliation universitaire</label>
-          <select v-model="filters.isUniversityAffiliated" class="form-input" @change="applyFilters">
+          <label for="uniAffiliationFilter" class="form-label">Affiliation universitaire</label>
+          <select id="uniAffiliationFilter" v-model="viewFilters.isUniversityAffiliated" class="form-input" @change="applyViewFilters" disabled>
             <option value="">Tous</option>
             <option value="true">Affilié</option>
             <option value="false">Non affilié</option>
@@ -63,8 +64,8 @@
         </div>
         
         <div>
-          <label class="form-label">Département</label>
-          <select v-model="filters.department" class="form-input" @change="applyFilters">
+          <label for="departmentFilter" class="form-label">Département</label>
+          <select id="departmentFilter" v-model="viewFilters.department" class="form-input" @change="applyViewFilters" disabled>
             <option value="">Tous les départements</option>
             <option value="informatique">Informatique</option>
             <option value="medecine">Médecine</option>
@@ -76,7 +77,8 @@
     </div>
 
     <!-- Statistiques rapides -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6" ref="statsRef">
+    <!-- Design doc GET /patients/stats: nombre total, nouveaux patients, actifs/inactifs -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6" ref="statsRef">
       <div class="bg-white p-6 rounded-lg shadow-sm">
         <div class="flex items-center">
           <div class="p-2 bg-blue-100 rounded-lg">
@@ -84,7 +86,7 @@
           </div>
           <div class="ml-4">
             <p class="text-sm font-medium text-gray-600">Total patients</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ stats.total }}</p>
+            <p class="text-2xl font-semibold text-gray-900">{{ storeStats.total || 0 }}</p>
           </div>
         </div>
       </div>
@@ -96,19 +98,7 @@
           </div>
           <div class="ml-4">
             <p class="text-sm font-medium text-gray-600">Actifs</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ stats.active }}</p>
-          </div>
-        </div>
-      </div>
-      
-      <div class="bg-white p-6 rounded-lg shadow-sm">
-        <div class="flex items-center">
-          <div class="p-2 bg-yellow-100 rounded-lg">
-            <AcademicCapIcon class="h-6 w-6 text-yellow-600" />
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-600">Étudiants</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ stats.students }}</p>
+            <p class="text-2xl font-semibold text-gray-900">{{ storeStats.active || 0 }}</p>
           </div>
         </div>
       </div>
@@ -119,8 +109,8 @@
             <CalendarDaysIcon class="h-6 w-6 text-purple-600" />
           </div>
           <div class="ml-4">
-            <p class="text-sm font-medium text-gray-600">Nouveaux (ce mois)</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ stats.newThisMonth }}</p>
+            <p class="text-sm font-medium text-gray-600">Nouveaux patients</p>
+            <p class="text-2xl font-semibold text-gray-900">{{ storeStats.new || 0 }}</p>
           </div>
         </div>
       </div>
@@ -132,12 +122,12 @@
         title="Liste des patients"
         :data="patients"
         :columns="columns"
-        :current-page="pagination.page"
-        :total-pages="pagination.totalPages"
-        :total-items="pagination.total"
+        :current-page="storePagination.currentPage || 1"
+        :total-pages="storePagination.totalPages || 0"
+        :total-items="storePagination.total || 0"
         :loading="loading"
         @page-change="handlePageChange"
-        @search="handleSearch"
+        @search="debouncedApplyFilters"
         @sort="handleSort"
       >
         <template #actions>
@@ -169,7 +159,7 @@
           </div>
         </template>
 
-        <template #cell-university="{ item }">
+        <template #cell-universityAffiliation="{ item }"> <!-- Changed from #cell-university -->
           <div v-if="item.isUniversityAffiliated">
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
               <AcademicCapIcon class="h-3 w-3 mr-1" />
@@ -194,7 +184,7 @@
           <span class="text-sm text-gray-900">{{ formatDate(value) }}</span>
         </template>
 
-        <template #table-actions="{ item }">
+        <template #table-actions="{ item }"> <!-- DataTable uses 'item' not 'row' based on its current definition -->
           <div class="flex items-center space-x-2">
             <button
               @click="viewPatient(item.id)"
@@ -209,7 +199,7 @@
               Modifier
             </button>
             <button
-              @click="deletePatient(item)"
+              @click="deletePatientHandler(item)"
               class="text-red-600 hover:text-red-900 text-sm font-medium"
             >
               Supprimer
@@ -222,12 +212,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { usePatientStore } from '@/stores/patient'
+import { notifications } from '@/composables/useNotifications' // Import notifications
 import { useGSAP } from '@/composables/useGSAP'
 import { formatDate, getInitials, debounce } from '@/utils/formatters'
 import Button from '@/components/ui/Button.vue'
-import DataTable from '@/components/ui/DataTable.vue'
+import DataTable, { type Column } from '@/components/ui/DataTable.vue'
 import {
   PlusIcon,
   ArrowDownTrayIcon,
@@ -240,6 +232,7 @@ import {
 } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
+const patientStore = usePatientStore() // Initialize patientStore
 const { fadeIn, staggerAnimation } = useGSAP()
 
 // Refs pour animations
@@ -407,10 +400,21 @@ const editPatient = (id: string) => {
   router.push(`/patients/${id}/edit`)
 }
 
-const deletePatient = (patient: any) => {
+const deletePatient = async (patient: { id: string, firstName: string, lastName: string }) => {
+  // TODO: Remplacer confirm par une modale de confirmation plus jolie (comme mentionné dans le code précédent)
   if (confirm(`Êtes-vous sûr de vouloir supprimer le patient ${patient.firstName} ${patient.lastName} ?`)) {
-    // Logique de suppression
-    console.log('Delete patient:', patient.id)
+    try {
+      await patientStore.deletePatient(patient.id);
+      notifications.success({ title: 'Succès', message: `Patient ${patient.firstName} ${patient.lastName} supprimé.` });
+      // La liste est mise à jour optimistically par le store.
+      // Si la pagination ou le total doit être rafraîchi immédiatement, on pourrait appeler ici:
+      // await loadData(); // ou une version qui ne fetch que les stats/pagination si la liste est déjà OK.
+    } catch (error) {
+      console.error("Suppression échouée depuis la vue:", error);
+      // Les erreurs API sont déjà notifiées par l'intercepteur global.
+      // Si une notification spécifique est nécessaire ici pour des erreurs non-API:
+      // notifications.error({ title: 'Échec Suppression', message: 'La suppression du patient a échoué.' });
+    }
   }
 }
 

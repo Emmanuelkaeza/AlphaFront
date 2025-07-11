@@ -67,6 +67,10 @@ export const usePatientStore = defineStore('patient', () => {
     }
   }
 
+import type { CreatePatientDto, UpdatePatientData as ServiceUpdatePatientData } from '@/services/patient'; // Import DTO types
+
+// ... (other imports and existing code) ...
+
   const fetchPatient = async (id: string) => {
     loading.value = true
     error.value = null
@@ -76,17 +80,20 @@ export const usePatientStore = defineStore('patient', () => {
     } catch (err) {
       error.value = 'Erreur lors du chargement du patient'
       console.error('Erreur fetchPatient:', err)
+      // Consider re-throwing or handling more explicitly if needed by view
     } finally {
       loading.value = false
     }
   }
 
-  const createPatient = async (patientData: any) => {
+  const createPatient = async (patientData: CreatePatientDto) => {
     loading.value = true
     error.value = null
     
     try {
       const newPatient = await patientService.createPatient(patientData)
+      // Consider if unshift is always desired, or if a refetch/invalidation is better for paginated views.
+      // For now, keeping unshift as it was.
       patients.value.unshift(newPatient)
       return newPatient
     } catch (err) {
@@ -98,7 +105,7 @@ export const usePatientStore = defineStore('patient', () => {
     }
   }
 
-  const updatePatient = async (id: string, patientData: any) => {
+  const updatePatient = async (id: string, patientData: ServiceUpdatePatientData) => {
     loading.value = true
     error.value = null
     
