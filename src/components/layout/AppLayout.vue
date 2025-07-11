@@ -181,17 +181,34 @@ const notificationContainer = ref()
 
 const user = computed(() => authStore.user)
 const userInitials = computed(() => {
-  if (!user.value) return ''
+  if (!user.value || !user.value.firstName || !user.value.lastName) return ''
   return `${user.value.firstName.charAt(0)}${user.value.lastName.charAt(0)}`.toUpperCase()
 })
 
-const navigation = [
-  { name: 'Tableau de bord', href: '/dashboard', icon: HomeIcon },
-  { name: 'Patients', href: '/patients', icon: UserGroupIcon },
-  { name: 'Abonnements', href: '/subscriptions', icon: DocumentTextIcon },
-  { name: 'Paiements', href: '/payments', icon: CreditCardIcon },
-  { name: 'Administration', href: '/admin', icon: CogIcon },
+interface NavItem {
+  name: string
+  href: string
+  icon: any // Vue component type for icons
+  roles?: string[] // Optional: roles that can see this item. If undefined, visible to all authenticated.
+}
+
+const allNavigationItems: NavItem[] = [
+  { name: 'Tableau de bord', href: '/dashboard', icon: HomeIcon, roles: ['admin', 'receptionist', 'patient'] }, // Assuming all roles can see dashboard
+  { name: 'Patients', href: '/patients', icon: UserGroupIcon, roles: ['admin', 'receptionist'] },
+  { name: 'Abonnements', href: '/subscriptions', icon: DocumentTextIcon, roles: ['admin', 'receptionist'] }, // Or include 'patient' if they can see their own
+  { name: 'Paiements', href: '/payments', icon: CreditCardIcon, roles: ['admin', 'receptionist'] }, // Or include 'patient'
+  { name: 'Administration', href: '/admin', icon: CogIcon, roles: ['admin'] },
+  // Example for a patient-specific view, if any:
+  // { name: 'Mon Profil', href: '/profile', icon: UserIcon, roles: ['patient'] }
 ]
+
+const navigation = computed(() => {
+  if (!user.value || !user.value.role) return []
+  const userRole = user.value.role
+  return allNavigationItems.filter(item => {
+    return !item.roles || item.roles.includes(userRole)
+  })
+})
 
 const breadcrumbs = computed(() => {
   const pathSegments = route.path.split('/').filter(Boolean)

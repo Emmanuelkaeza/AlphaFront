@@ -81,19 +81,34 @@ const router = createRouter({
 })
 
 // Garde de navigation globale
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
   
-  // Charger l'utilisateur depuis le localStorage si pas encore fait
+  // Gérer l'initialisation de l'état d'authentification
   if (!authStore.user && authStore.token) {
-    authStore.loadUserFromStorage()
+    authStore.loadUserFromStorage() // Charge l'utilisateur depuis localStorage (synchrone)
+    if (authStore.user) { // Si l'utilisateur a été chargé depuis localStorage
+      try {
+        // Tenter de rafraîchir le profil pour valider le token et obtenir les dernières infos
+        // Cela se fait en arrière-plan et ne bloque pas la navigation initiale si l'utilisateur existe déjà dans localStorage
+        // Si refreshProfile échoue (ex: token invalide), le store auth gère la déconnexion.
+        await authStore.refreshProfile()
+      } catch (error) {
+        // L'erreur est déjà gérée dans refreshProfile (logout), mais on peut logguer ici si besoin.
+        console.error('Failed to refresh profile during initial load:', error)
+        // Si refreshProfile a provoqué une déconnexion, isAuthenticated sera false
+        // et la logique ci-dessous redirigera vers /login si nécessaire.
+      }
+    }
   }
   
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    // Si après refreshProfile (ou tentative), l'utilisateur n'est plus authentifié
+    // et la route requiert l'authentification, rediriger vers login.
     next('/login')
   } else if (to.meta.requiresGuest && authStore.isAuthenticated) {
     next('/dashboard')
-  } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
+  } else if (to.meta.requiresAdmin && authStore.isAuthenticated && !authStore.isAdmin) { // Ajout de la vérification isAuthenticated
     next('/dashboard')
   } else {
     next()
