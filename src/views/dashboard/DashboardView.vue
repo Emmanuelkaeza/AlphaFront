@@ -25,18 +25,24 @@
     <!-- Statistiques principales -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" ref="statsRef">
       <StatCard
-        title="Patients"
-        :value="stats.patients?.total || 0"
-        :trend="stats.patients?.growth || 0"
+        title="Total Patients"
+        :value="patientStats.total || 0"
+        :trend="patientStats.monthlyGrowth || 0" // Assuming monthlyGrowth can serve as a trend indicator
         icon="UserGroupIcon"
         color="blue"
         :loading="loading"
       />
-      
+      <StatCard
+        title="Total Utilisateurs"
+        :value="totalUserStats.total || 0"
+        icon="UsersIcon"
+        color="purple"
+        :loading="loading"
+      />
       <StatCard
         title="Abonnements actifs"
-        :value="stats.subscriptions?.active || 0"
-        :trend="stats.subscriptions?.growth || 0"
+        :value="mockStats.subscriptions?.active || 0"
+        :trend="mockStats.subscriptions?.growth || 0"
         icon="DocumentCheckIcon"
         color="green"
         :loading="loading"
@@ -44,18 +50,25 @@
       
       <StatCard
         title="Revenus mensuels"
-        :value="formatCurrency(stats.payments?.monthlyRevenue || 0)"
-        :trend="stats.payments?.growth || 0"
+        :value="formatCurrency(mockStats.payments?.monthlyRevenue || 0)"
+        :trend="mockStats.payments?.growth || 0"
         icon="CurrencyDollarIcon"
         color="yellow"
         :loading="loading"
       />
       
-      <StatCard
-        title="Paiements en attente"
-        :value="stats.payments?.pending || 0"
-        icon="ClockIcon"
-        color="red"
+      <!-- Removed 'Paiements en attente' to make space for 'Total Utilisateurs', can be re-added if layout supports 5 cards or if one is less critical -->
+      <!-- Or, if we want to keep 4 cards, one of the mock ones needs to be replaced or stats combined. -->
+      <!-- For now, showing Patients, Users, Subscriptions (mock), Payments (mock) -->
+      <!-- The 'Paiements en attente' card was removed. If it's important, we can adjust. -->
+      <!-- Let's adjust to show 4 cards: Patients (real), Users (real), Subscriptions (mock), Payments (mock) -->
+      <!-- The original "Paiements en attente" card is removed to fit "Total Utilisateurs" in a 4-card layout. -->
+      <!-- If "Paiements en attente" is crucial, the layout might need to show 5 cards or one existing card (e.g. "Revenus mensuels") could be combined or deprioritized for this view -->
+
+    </div>
+
+    <!-- Graphiques -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" ref="chartsRef">
         :loading="loading"
       />
     </div>
@@ -161,8 +174,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue' // Added computed
 import { useRouter } from 'vue-router'
+import { usePatientStore } from '@/stores/patient' // Added patientStore
+import { useUserStore } from '@/stores/userStore'   // Added userStore
 import { useGSAP } from '@/composables/useGSAP'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
 import Button from '@/components/ui/Button.vue'
@@ -175,10 +190,13 @@ import {
   UserPlusIcon,
   DocumentPlusIcon,
   CreditCardIcon,
-  ChartBarIcon
+  ChartBarIcon,
+  UsersIcon // Added UsersIcon
 } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
+const patientStore = usePatientStore()
+const userStore = useUserStore()
 const { staggerAnimation, fadeIn } = useGSAP()
 
 // Refs pour animations
@@ -189,14 +207,15 @@ const activitiesRef = ref<HTMLElement>()
 const quickActionsRef = ref<HTMLElement>()
 
 // Data
-const loading = ref(false)
-const selectedPeriod = ref('30j')
+const loading = computed(() => patientStore.loading || userStore.loadingStats) // Combined loading state
+const selectedPeriod = ref('30j') // For charts, remains mock for now
 
-const stats = ref({
-  patients: {
-    total: 1247,
-    growth: 12.5
-  },
+// Real stats from stores
+const patientStats = computed(() => patientStore.stats)
+const totalUserStats = computed(() => userStore.stats)
+
+// Mock data for other stats and charts will remain for now
+const mockStats = ref({
   subscriptions: {
     active: 892,
     growth: 8.3
@@ -283,16 +302,19 @@ const quickActions = [
 ]
 
 const refreshData = async () => {
-  loading.value = true
+  // loading state is computed, store actions will set their specific loading states
   try {
-    // Simuler un appel API
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    // Ici, on ferait les vrais appels API pour récupérer les données
+    await Promise.all([
+      patientStore.fetchPatientStats(),
+      userStore.fetchUserStats()
+      // TODO: Add calls for subscriptionStore.fetchStats(), paymentStore.fetchStats() when available
+    ]);
   } catch (error) {
-    console.error('Erreur lors du rafraîchissement:', error)
-  } finally {
-    loading.value = false
+    console.error('Erreur lors du rafraîchissement du tableau de bord:', error)
+    // Individual store actions should handle their own errors and potentially set error states
+    // A global notification for dashboard refresh failure might be useful here if not handled by interceptors
   }
+  // loading state will automatically update based on store loading states
 }
 
 const handleQuickAction = (action: string) => {
