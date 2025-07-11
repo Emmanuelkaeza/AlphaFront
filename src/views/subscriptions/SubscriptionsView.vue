@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- En-tête -->
-    <div class="bg-white rounded-lg shadow-sm p-6" ref="headerRef">
+    <div class="bg-white rounded-lg shadow-sm p-6" :ref="el => headerRef = el as HTMLElement">
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-2xl font-bold text-gray-900">Abonnements</h1>
@@ -10,7 +10,7 @@
           </p>
         </div>
         <div class="flex items-center space-x-3">
-          <Button variant="outline" @click="exportData">
+          <Button variant="outline" @click="exportData" :disabled="loading">
             <ArrowDownTrayIcon class="h-4 w-4 mr-2" />
             Exporter
           </Button>
@@ -23,10 +23,10 @@
     </div>
 
     <!-- Statistiques -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6" ref="statsRef">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6" :ref="el => statsRef = el as HTMLElement">
       <StatCard
         title="Total abonnements"
-        :value="stats.total"
+        :value="storeStats.total"
         icon="DocumentTextIcon"
         color="blue"
         :loading="loading"
@@ -34,8 +34,8 @@
       
       <StatCard
         title="Actifs"
-        :value="stats.active"
-        :trend="stats.activeGrowth"
+        :value="storeStats.active"
+        :trend="storeStats.renewalRate" <!-- Assuming renewalRate can be used as a trend for active ones -->
         icon="CheckCircleIcon"
         color="green"
         :loading="loading"
@@ -43,16 +43,15 @@
       
       <StatCard
         title="Expirent bientôt"
-        :value="stats.expiringSoon"
+        :value="storeStats.expiringSoon || 0" <!-- Default to 0 if undefined -->
         icon="ClockIcon"
         color="yellow"
         :loading="loading"
       />
       
       <StatCard
-        title="Revenus mensuels"
-        :value="formatCurrency(stats.monthlyRevenue)"
-        :trend="stats.revenueGrowth"
+        title="Revenus mensuels (Abo.)" <!-- Clarified this is subscription revenue -->
+        :value="formatCurrency(storeStats.monthlyRevenue || 0)" <!-- Default to 0 -->
         icon="CurrencyDollarIcon"
         color="purple"
         :loading="loading"
@@ -60,36 +59,38 @@
     </div>
 
     <!-- Filtres -->
-    <div class="bg-white rounded-lg shadow-sm p-6" ref="filtersRef">
+    <div class="bg-white rounded-lg shadow-sm p-6" :ref="el => filtersRef = el as HTMLElement">
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
-          <label class="form-label">Recherche</label>
+          <label for="subSearch" class="form-label">Recherche Patient</label>
           <div class="relative">
             <MagnifyingGlassIcon class="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
-              v-model="filters.search"
+              id="subSearch"
+              v-model="viewFilters.search"
               type="text"
-              placeholder="Patient, plan..."
+              placeholder="Nom, email patient..."
               class="form-input pl-10"
-              @input="debouncedSearch"
+              @input="debouncedApplyFilters"
             />
           </div>
         </div>
         
         <div>
-          <label class="form-label">Statut</label>
-          <select v-model="filters.status" class="form-input" @change="applyFilters">
+          <label for="subStatus" class="form-label">Statut</label>
+          <select id="subStatus" v-model="viewFilters.status" class="form-input" @change="applyViewFilters">
             <option value="">Tous les statuts</option>
             <option value="active">Actif</option>
             <option value="expired">Expiré</option>
             <option value="cancelled">Annulé</option>
-            <option value="suspended">Suspendu</option>
+            <option value="pending_payment">Paiement en attente</option>
+            <!-- 'suspended' n'est pas dans SubscriptionStatus de service, mais était dans le mock. Ajout de pending_payment -->
           </select>
         </div>
         
         <div>
-          <label class="form-label">Plan</label>
-          <select v-model="filters.planId" class="form-input" @change="applyFilters">
+          <label for="subPlan" class="form-label">Plan</label>
+          <select id="subPlan" v-model="viewFilters.planId" class="form-input" @change="applyViewFilters">
             <option value="">Tous les plans</option>
             <option v-for="plan in subscriptionPlans" :key="plan.id" :value="plan.id">
               {{ plan.name }}
@@ -98,8 +99,9 @@
         </div>
         
         <div>
-          <label class="form-label">Renouvellement auto</label>
-          <select v-model="filters.autoRenew" class="form-input" @change="applyFilters">
+          <label for="subAutoRenew" class="form-label">Renouvellement auto</label>
+          <select id="subAutoRenew" v-model="viewFilters.autoRenew" class="form-input" @change="applyViewFilters" disabled>
+            <!-- Disabled car non géré par le store/service filters pour l'instant -->
             <option value="">Tous</option>
             <option value="true">Activé</option>
             <option value="false">Désactivé</option>
@@ -109,17 +111,17 @@
     </div>
 
     <!-- Tableau des abonnements -->
-    <div class="bg-white rounded-lg shadow-sm" ref="tableRef">
+    <div class="bg-white rounded-lg shadow-sm" :ref="el => tableRef = el as HTMLElement">
       <DataTable
         title="Liste des abonnements"
         :data="subscriptions"
         :columns="columns"
-        :current-page="pagination.page"
-        :total-pages="pagination.totalPages"
-        :total-items="pagination.total"
+        :current-page="storePagination.currentPage"
+        :total-pages="storePagination.totalPages"
+        :total-items="storePagination.total"
         :loading="loading"
         @page-change="handlePageChange"
-        @search="handleSearch"
+        @search="debouncedApplyFilters" <!-- Assumant que DataTable émet la query de recherche -->
         @sort="handleSort"
       >
         <template #actions>
@@ -225,8 +227,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue' // Added computed
 import { useRouter } from 'vue-router'
+import { useSubscriptionStore } from '@/stores/subscriptionStore' // Added store
 import { useGSAP } from '@/composables/useGSAP'
 import { formatDate, formatCurrency, getInitials, debounce } from '@/utils/formatters'
 import Button from '@/components/ui/Button.vue'
@@ -240,6 +243,7 @@ import {
 } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
+const subscriptionStore = useSubscriptionStore()
 const { fadeIn, staggerAnimation } = useGSAP()
 
 // Refs pour animations
@@ -248,37 +252,26 @@ const statsRef = ref<HTMLElement>()
 const filtersRef = ref<HTMLElement>()
 const tableRef = ref<HTMLElement>()
 
-// État
-const loading = ref(false)
-const subscriptions = ref([])
+// État mappé au store
+const loading = computed(() => subscriptionStore.loading || subscriptionStore.loadingStats)
+const subscriptions = computed(() => subscriptionStore.subscriptions)
+const storePagination = computed(() => subscriptionStore.pagination)
+const storeStats = computed(() => subscriptionStore.stats)
+
+// Filtres locaux de la vue
+const viewFilters = reactive({
+  search: '', // Utilisé pour patientId dans le store filter
+  status: '',
+  planId: '',
+  autoRenew: '' // Ce filtre n'est pas dans SubscriptionFilters du store, à ajouter si nécessaire
+})
+
+// Plans d'abonnement (mock pour l'instant, à remplacer par une source de données réelle si besoin)
 const subscriptionPlans = ref([
   { id: '1', name: 'Plan Étudiant', price: 25000 },
   { id: '2', name: 'Plan Standard', price: 50000 },
   { id: '3', name: 'Plan Premium', price: 75000 }
 ])
-
-const stats = ref({
-  total: 150,
-  active: 128,
-  expiringSoon: 12,
-  monthlyRevenue: 3750000,
-  activeGrowth: 8.5,
-  revenueGrowth: 12.3
-})
-
-const filters = reactive({
-  search: '',
-  status: '',
-  planId: '',
-  autoRenew: ''
-})
-
-const pagination = reactive({
-  page: 1,
-  limit: 10,
-  total: 0,
-  totalPages: 0
-})
 
 // Configuration du tableau
 const columns = [
@@ -364,73 +357,113 @@ const getRemainingDays = (endDate: string) => {
 }
 
 // Actions
-const loadData = async () => {
-  loading.value = true
-  try {
-    await new Promise(resolve => setTimeout(resolve, 800))
-    subscriptions.value = mockSubscriptions as any
-    pagination.total = mockSubscriptions.length
-    pagination.totalPages = Math.ceil(mockSubscriptions.length / pagination.limit)
-  } catch (error) {
-    console.error('Erreur lors du chargement:', error)
-  } finally {
-    loading.value = false
-  }
+const loadSubscriptionListData = async (page?: number) => {
+  // loading state is computed from store
+  const filtersToApply = {
+    patientId: viewFilters.search, // Map search to patientId as discussed
+    status: viewFilters.status || undefined, // Pass undefined if empty string for cleaner API query
+    planId: viewFilters.planId || undefined,
+    // autoRenew is not in store filters yet
+  };
+  subscriptionStore.setSubscriptionFilters(filtersToApply);
+  // fetchSubscriptions will be triggered by setSubscriptionFilters if page is 1,
+  // or we can call it directly if page is provided.
+  // The store's fetchSubscriptions already resets to page 1 if filters change via setSubscriptionFilters.
+  // So, if page is provided here, it's likely from pagination.
+  await subscriptionStore.fetchSubscriptions(page || storePagination.value.currentPage);
 }
 
-const applyFilters = () => {
-  loadData()
+const loadSubscriptionStats = async () => {
+  await subscriptionStore.fetchSubscriptionStats();
 }
 
-const handleSearch = (query: string) => {
-  filters.search = query
-  applyFilters()
+const applyViewFilters = () => {
+  // setSubscriptionFilters in store will trigger fetchSubscriptions(1)
+  subscriptionStore.setSubscriptionFilters({
+    patientId: viewFilters.search,
+    status: viewFilters.status || undefined,
+    planId: viewFilters.planId || undefined,
+  });
 }
 
-const debouncedSearch = debounce(() => {
-  applyFilters()
-}, 300)
+const debouncedApplyFilters = debounce(() => {
+  applyViewFilters();
+}, 500)
 
 const handlePageChange = (page: number) => {
-  pagination.page = page
-  loadData()
+  loadSubscriptionListData(page);
 }
 
 const handleSort = (key: string, direction: 'asc' | 'desc') => {
-  console.log('Sort:', key, direction)
+  // TODO: Implement server-side sorting if API supports it
+  console.log('Sort attempt (subscriptions):', key, direction)
+  // If client-side sorting is handled by DataTable, no specific action needed here.
+  // If server-side: subscriptionStore.setSort(key, direction); loadSubscriptionListData(1);
 }
 
-const refreshData = () => {
-  loadData()
+const refreshData = async () => {
+  await loadSubscriptionListData();
+  await loadSubscriptionStats();
 }
 
 const exportData = () => {
-  console.log('Export abonnements')
+  // TODO: Implement export functionality using subscriptionStore.exportSubscriptions()
+  console.log('Export abonnements (placeholder)')
+  notifications.info({ title: 'Exportation', message: 'Fonctionnalité d\'exportation non implémentée.'})
 }
 
 const viewSubscription = (id: string) => {
-  router.push(`/subscriptions/${id}`)
+  router.push(`/subscriptions/${id}`) // TODO: Create this route and view
 }
 
-const renewSubscription = (subscription: any) => {
-  if (confirm(`Renouveler l'abonnement de ${subscription.patient.firstName} ${subscription.patient.lastName} ?`)) {
-    console.log('Renouveler:', subscription.id)
+const renewSubscription = async (subscription: any) => {
+  // TODO: Replace prompt with a proper modal for better UX and input validation
+  const durationDaysStr = prompt(`Renouveler l'abonnement de ${subscription.patient?.firstName} ${subscription.patient?.lastName} pour combien de jours supplémentaires ?`, "30");
+
+  if (durationDaysStr) {
+    const durationDays = parseInt(durationDaysStr, 10);
+    if (isNaN(durationDays) || durationDays <= 0) {
+      notifications.error({ title: 'Durée invalide', message: 'Veuillez entrer un nombre de jours valide.' });
+      return;
+    }
+
+    try {
+      await subscriptionStore.renewSubscription(subscription.id, { durationDays });
+      // Success notification is handled by the store action.
+      // The list will also be updated by the store action.
+    } catch (error) {
+      // Error notification is handled by the global interceptor or store action's catch block.
+      console.error('Failed to renew subscription from view:', error);
+    }
   }
 }
 
 const suspendSubscription = (subscription: any) => {
-  if (confirm(`Suspendre l'abonnement de ${subscription.patient.firstName} ${subscription.patient.lastName} ?`)) {
-    console.log('Suspendre:', subscription.id)
+  // TODO: Implement suspend logic using store action (PATCH /subscriptions/:id with status 'suspended')
+  if (confirm(`Suspendre l'abonnement de ${subscription.patient?.firstName} ${subscription.patient?.lastName} ?`)) {
+    console.log('Suspendre (placeholder):', subscription.id)
+    notifications.info({ title: 'Suspension', message: 'Fonctionnalité de suspension non implémentée.'})
   }
 }
 
-const cancelSubscription = (subscription: any) => {
-  if (confirm(`Annuler l'abonnement de ${subscription.patient.firstName} ${subscription.patient.lastName} ?`)) {
-    console.log('Annuler:', subscription.id)
+const cancelSubscription = async (subscription: any) => {
+  // TODO: Replace confirm with a proper modal for better UX
+  if (confirm(`Êtes-vous sûr de vouloir annuler l'abonnement de ${subscription.patient?.firstName} ${subscription.patient?.lastName} ? Cet abonnement sera définitivement supprimé ou marqué comme annulé.`)) {
+    try {
+      await subscriptionStore.cancelSubscription(subscription.id);
+      // Success notification is handled by the store action.
+      // The list will also be updated by the store action.
+      // May need to call refreshData() if total count impacts pagination display significantly and isn't reactive enough.
+    } catch (error) {
+      // Error notification is handled by the global interceptor or store action's catch block.
+      console.error('Failed to cancel subscription from view:', error);
+    }
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await refreshData(); // Load both list and stats
+
   // Animations d'entrée
   setTimeout(() => {
     if (headerRef.value) fadeIn(headerRef.value)
